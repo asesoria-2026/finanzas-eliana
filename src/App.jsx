@@ -398,9 +398,42 @@ export default function FinanzasApp() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
-  // Carga y migración ya manejadas por los useEffects de Supabase de arriba
+  // Auth: escuchar sesion
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
-        // [VERCEL: window.storage no disponible]
+  // Cargar datos cuando hay sesion autenticada
+  useEffect(() => {
+    if (!session || !session.user) return;
+    (async () => {
+      try {
+        let d = await cargarDatos(session.user.id);
+        if (!d) d = seedDataV2();
+        setData(d);
+      } catch (e) {
+        console.error("Error cargando datos:", e);
+        setData(seedDataV2());
+      }
+      setLoaded(true);
+    })();
+  }, [session?.user?.id]);
+
+  // Guardar datos con debounce cuando cambian
+  useEffect(() => {
+    if (!loaded || !data || !session || !session.user) return;
+    const timer = setTimeout(async () => {
+      try { await guardarDatos(session.user.id, data); }
+      catch (e) { console.error("Error guardando:", e); }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [data, loaded]);
 
   // Metas por defecto por cada deuda activa
   useEffect(() => {
@@ -422,6 +455,14 @@ export default function FinanzasApp() {
       }));
     }
   }, [loaded, data?.deudas?.length]);
+
+  // Pantalla de carga de sesion
+  if (session === undefined) {
+    return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#F1F3EC',fontFamily:'sans-serif',color:'#55605A',fontSize:14}}>Cargando…</div>;
+  }
+
+  // Pantalla de login si no hay sesion
+  if (!session) return <Auth />;
 
   if (!loaded || !data) {
     return (
