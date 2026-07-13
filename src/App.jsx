@@ -7,8 +7,6 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
-const STORAGE_KEY_V2 = "eliana-finanzas-v2";
-const STORAGE_KEY_V1 = "eliana-finanzas-personal-v1";
 
 // ---------------- Utilidades ----------------
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -234,41 +232,9 @@ function migrateFromV1(old, base) {
   return next;
 }
 
-// Importa datos del módulo Compartidos legacy (claves propias en window.storage)
+        // [VERCEL: window.storage no disponible]
 async function importCompartidosLegacy(data) {
-  let changed = false;
-  const next = { ...data };
-  try {
-    const cfg = await window.storage.get("budget-config", false);
-    if (cfg && cfg.value) {
-      const cats = JSON.parse(cfg.value).map((c) =>
-        c.id === "dona_alba" ? { ...c, id: "limpieza", label: "Limpieza" } : c
-      );
-      next.compartidosCategorias = cats;
-      changed = true;
-    }
-  } catch (e) {}
-  try {
-    const exp = await window.storage.get("expenses", false);
-    if (exp && exp.value) {
-      const gastos = JSON.parse(exp.value).map((g) => ({
-        ...g, category: g.category === "dona_alba" ? "limpieza" : g.category,
-        porcentaje: g.porcentaje || 100, movId: g.movId || null,
-      }));
-      next.compartidosGastos = gastos;
-      changed = true;
-    }
-  } catch (e) {}
-  try {
-    const dir = await window.storage.get("terceros-directory", false);
-    if (dir && dir.value) {
-      next.compartidosDirectorio = JSON.parse(dir.value).map((d) =>
-        d.categoria === "dona_alba" ? { ...d, categoria: "limpieza" } : d
-      );
-      changed = true;
-    }
-  } catch (e) {}
-  return { data: next, changed };
+  return { data, changed: false };
 }
 
 // ---------------- Derivaciones de medio de pago (color / etiqueta / naturaleza) ----------------
@@ -432,38 +398,9 @@ export default function FinanzasApp() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
-  // ---------- Carga y migración ----------
-  useEffect(() => {
-    (async () => {
-      let d = null;
-      try {
-        const res = await window.storage.get(STORAGE_KEY_V2, false);
-        if (res && res.value) d = JSON.parse(res.value);
-      } catch (e) {}
-      if (!d) {
-        const base = seedDataV2();
-        let old = null;
-        try {
-          const resOld = await window.storage.get(STORAGE_KEY_V1, false);
-          if (resOld && resOld.value) old = JSON.parse(resOld.value);
-        } catch (e) {}
-        d = old ? migrateFromV1(old, base) : base;
-        const imp = await importCompartidosLegacy(d);
-        d = imp.data;
-        if (old || imp.changed) setTimeout(() => showToast("Datos anteriores migrados al nuevo modelo."), 400);
-      }
-      setData(d);
-      setLoaded(true);
-    })();
-  }, []);
+  // Carga y migración ya manejadas por los useEffects de Supabase de arriba
 
-  useEffect(() => {
-    if (!loaded || !data) return;
-    (async () => {
-      try { await window.storage.set(STORAGE_KEY_V2, JSON.stringify(data), false); }
-      catch (e) { console.error("No se pudo guardar", e); }
-    })();
-  }, [data, loaded]);
+        // [VERCEL: window.storage no disponible]
 
   // Metas por defecto por cada deuda activa
   useEffect(() => {
