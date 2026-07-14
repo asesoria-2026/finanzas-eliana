@@ -415,23 +415,31 @@ export default function FinanzasApp() {
     (async () => {
       try {
         let d = await cargarDatos(session.user.id);
-        if (!d) d = seedDataV2();
-        setData(d);
+        if (d) {
+          setData({ ...d, _soloLectura: true });
+          setTimeout(() => setData(prev => ({ ...prev, _soloLectura: false })), 3000);
+        } else {
+          setData({ ...seedDataV2(), _soloLectura: true });
+          setTimeout(() => setData(prev => ({ ...prev, _soloLectura: false })), 3000);
+        }
       } catch (e) {
         console.error("Error cargando datos:", e);
-        setData(seedDataV2());
+        setData({ ...seedDataV2(), _soloLectura: true });
+        setTimeout(() => setData(prev => ({ ...prev, _soloLectura: false })), 3000);
       }
       setLoaded(true);
     })();
   }, [session?.user?.id]);
 
-  // Guardar datos con debounce cuando cambian
+  // Guardar datos con debounce — solo si hay datos reales y el usuario los modificó
   useEffect(() => {
     if (!loaded || !data || !session || !session.user) return;
+    // No guardar si es la carga inicial sin cambios del usuario
+    if (data._soloLectura) return;
     const timer = setTimeout(async () => {
       try { await guardarDatos(session.user.id, data); }
       catch (e) { console.error("Error guardando:", e); }
-    }, 800);
+    }, 1500);
     return () => clearTimeout(timer);
   }, [data, loaded]);
 
