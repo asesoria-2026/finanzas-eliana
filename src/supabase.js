@@ -16,8 +16,17 @@ export async function cargarDatos(userId) {
 }
 
 export async function guardarDatos(userId, datos) {
-  const { error } = await supabase
+  // Intentar update primero; si no existe la fila, hacer insert
+  const { error: updateError } = await supabase
     .from('finanzas_data')
-    .upsert({ user_id: userId, data: datos, updated_at: new Date().toISOString() })
-  if (error) throw error
+    .update({ data: datos, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+
+  if (updateError) {
+    // Si update falla, intentar insert
+    const { error: insertError } = await supabase
+      .from('finanzas_data')
+      .insert({ user_id: userId, data: datos, updated_at: new Date().toISOString() })
+    if (insertError) throw insertError
+  }
 }
