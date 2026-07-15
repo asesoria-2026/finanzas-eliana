@@ -1,12 +1,12 @@
-import { useState, useEffect } from "react";
-import { supabase, cargarDatos, guardarDatos } from "./supabase.js";
-import Auth from "./Auth.jsx";
+import { useState, useEffect, useMemo } from "react";
 import {
   Plus, Trash2, Wallet, Users, CreditCard, Target, LayoutGrid, Download,
   Database, HandCoins, ChevronLeft, ChevronRight, Pencil, Check, X, AlertTriangle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
+const STORAGE_KEY_V2 = "eliana-finanzas-v2";
+const STORAGE_KEY_V1 = "eliana-finanzas-personal-v1";
 
 // ---------------- Utilidades ----------------
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -232,9 +232,41 @@ function migrateFromV1(old, base) {
   return next;
 }
 
-        // [VERCEL: window.storage no disponible]
+// Importa datos del módulo Compartidos legacy (claves propias en window.storage)
 async function importCompartidosLegacy(data) {
-  return { data, changed: false };
+  let changed = false;
+  const next = { ...data };
+  try {
+    const cfg = await window.storage.get("budget-config", false);
+    if (cfg && cfg.value) {
+      const cats = JSON.parse(cfg.value).map((c) =>
+        c.id === "dona_alba" ? { ...c, id: "limpieza", label: "Limpieza" } : c
+      );
+      next.compartidosCategorias = cats;
+      changed = true;
+    }
+  } catch (e) {}
+  try {
+    const exp = await window.storage.get("expenses", false);
+    if (exp && exp.value) {
+      const gastos = JSON.parse(exp.value).map((g) => ({
+        ...g, category: g.category === "dona_alba" ? "limpieza" : g.category,
+        porcentaje: g.porcentaje || 100, movId: g.movId || null,
+      }));
+      next.compartidosGastos = gastos;
+      changed = true;
+    }
+  } catch (e) {}
+  try {
+    const dir = await window.storage.get("terceros-directory", false);
+    if (dir && dir.value) {
+      next.compartidosDirectorio = JSON.parse(dir.value).map((d) =>
+        d.categoria === "dona_alba" ? { ...d, categoria: "limpieza" } : d
+      );
+      changed = true;
+    }
+  } catch (e) {}
+  return { data: next, changed };
 }
 
 // ---------------- Derivaciones de medio de pago (color / etiqueta / naturaleza) ----------------
@@ -376,7 +408,6 @@ const emptyCategoria = { nombre: "", tipoGasto: "Fijo-Fijo", presupuesto: "" };
 export default function FinanzasApp() {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
-  const [session, setSession] = useState(undefined); // undefined = cargando, null = no auth, objeto = autenticado
   const [tab, setTab] = useState("panorama");
   const [fuenteSec, setFuenteSec] = useState("ingresos");
   const [selectedMonth, setSelectedMonth] = useState(monthISO());
@@ -398,49 +429,37 @@ export default function FinanzasApp() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
-  // Auth: escuchar sesion
+  // ---------- Carga y migración ----------
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // Cargar datos cuando hay sesion autenticada
-  useEffect(() => {
-    if (!session || !session.user) return;
     (async () => {
+      let d = null;
       try {
-        let d = await cargarDatos(session.user.id);
-        if (d) {
-          setData({ ...d, _soloLectura: true });
-          setTimeout(() => setData(prev => ({ ...prev, _soloLectura: false })), 3000);
-        } else {
-          setData({ ...seedDataV2(), _soloLectura: true });
-          setTimeout(() => setData(prev => ({ ...prev, _soloLectura: false })), 3000);
-        }
-      } catch (e) {
-        console.error("Error cargando datos:", e);
-        setData({ ...seedDataV2(), _soloLectura: true });
-        setTimeout(() => setData(prev => ({ ...prev, _soloLectura: false })), 3000);
+        const res = await window.storage.get(STORAGE_KEY_V2, false);
+        if (res && res.value) d = JSON.parse(res.value);
+      } catch (e) {}
+      if (!d) {
+        const base = seedDataV2();
+        let old = null;
+        try {
+          const resOld = await window.storage.get(STORAGE_KEY_V1, false);
+          if (resOld && resOld.value) old = JSON.parse(resOld.value);
+        } catch (e) {}
+        d = old ? migrateFromV1(old, base) : base;
+        const imp = await importCompartidosLegacy(d);
+        d = imp.data;
+        if (old || imp.changed) setTimeout(() => showToast("Datos anteriores migrados al nuevo modelo."), 400);
       }
+      setData(d);
       setLoaded(true);
     })();
-  }, [session?.user?.id]);
+  }, []);
 
-  // Guardar datos con debounce — solo si hay datos reales y el usuario los modificó
   useEffect(() => {
-    if (!loaded || !data || !session || !session.user) return;
-    // No guardar si es la carga inicial sin cambios del usuario
-    if (data._soloLectura) return;
-    const timer = setTimeout(async () => {
-      try { await guardarDatos(session.user.id, data); }
-      catch (e) { console.error("Error guardando:", e); }
-    }, 1500);
-    return () => clearTimeout(timer);
+    if (!loaded || !data) return;
+    (async () => {
+      try { await window.storage.set(STORAGE_KEY_V2, JSON.stringify(data), false); }
+      catch (e) { console.error("No se pudo guardar", e); }
+    })();
   }, [data, loaded]);
 
   // Metas por defecto por cada deuda activa
@@ -463,14 +482,6 @@ export default function FinanzasApp() {
       }));
     }
   }, [loaded, data?.deudas?.length]);
-
-  // Pantalla de carga de sesion
-  if (session === undefined) {
-    return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#F1F3EC',fontFamily:'sans-serif',color:'#55605A',fontSize:14}}>Cargando…</div>;
-  }
-
-  // Pantalla de login si no hay sesion
-  if (!session) return <Auth />;
 
   if (!loaded || !data) {
     return (
@@ -1148,11 +1159,11 @@ export default function FinanzasApp() {
 
           <label>Tercero
             <SelectConOtro label="tercero" value={movForm.terceroId} onChange={(v) => setMovForm((f) => ({ ...f, terceroId: v }))}
-              opciones={data.terceros} placeholder="Selecciona…" onCrear={crearTercero} />
+              opciones={[...data.terceros].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"))} placeholder="Selecciona…" onCrear={crearTercero} />
           </label>
           <label>Medio de pago
             <SelectConOtro label="medio de pago" value={movForm.medioPagoId} onChange={(v) => setMovForm((f) => ({ ...f, medioPagoId: v, cuentaOrigenId: "" }))}
-              opciones={data.mediosPago} placeholder="Selecciona…" onCrear={crearMedio} />
+              opciones={[...data.mediosPago].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"))} placeholder="Selecciona…" onCrear={crearMedio} />
           </label>
 
           {esEfectivo && (
@@ -1171,7 +1182,7 @@ export default function FinanzasApp() {
               <label>Categoría
                 <SelectConOtro label="categoría" value={movForm.categoriaId}
                   onChange={(v) => setMovForm((f) => ({ ...f, categoriaId: v, subcategoriaId: "", deudaId: "", abonoCapital: "", tarjetaPagoId: "" }))}
-                  opciones={data.categorias.map((c) => ({ id: c.id, nombre: c.nombre }))} placeholder="Selecciona…" onCrear={crearCategoria} />
+                  opciones={[...data.categorias].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es")).map((c) => ({ id: c.id, nombre: c.nombre }))} placeholder="Selecciona…" onCrear={crearCategoria} />
               </label>
               {catSeleccionada && catSeleccionada.subcategorias.length > 0 && (
                 <label>Subcategoría
@@ -1202,7 +1213,7 @@ export default function FinanzasApp() {
                   setMovForm({ ...movForm, deudaId: e.target.value, abonoCapital: abono });
                 }}>
                   <option value="">Selecciona…</option>
-                  {data.deudas.map((d) => <option key={d.id} value={d.id}>{d.identificador} — {d.nombre}</option>)}
+                  {[...data.deudas].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es")).map((d) => <option key={d.id} value={d.id}>{d.identificador} — {d.nombre}</option>)}
                 </select>
               </label>
               )}
@@ -1248,10 +1259,18 @@ export default function FinanzasApp() {
                 </select>
               </label>
               <label>Categoría en Compartidos
-                <select value={movForm.compartidoCategoriaId} onChange={(e) => setMovForm({ ...movForm, compartidoCategoriaId: e.target.value })}>
-                  <option value="">Selecciona…</option>
-                  {data.compartidosCategorias.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select>
+                <SelectConOtro
+                  label="categoría compartida"
+                  value={movForm.compartidoCategoriaId}
+                  onChange={(v) => setMovForm((f) => ({ ...f, compartidoCategoriaId: v }))}
+                  opciones={[...data.compartidosCategorias].sort((a, b) => a.label.localeCompare(b.label, "es")).map((c) => ({ id: c.id, nombre: c.label }))}
+                  placeholder="Selecciona…"
+                  onCrear={(nombre) => {
+                    const id = uid();
+                    setData((d) => ({ ...d, compartidosCategorias: [...d.compartidosCategorias, { id, label: nombre, tag: "Personal", budget: 0 }] }));
+                    return id;
+                  }}
+                />
               </label>
             </>
           )}
