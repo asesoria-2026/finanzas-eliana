@@ -1,12 +1,76 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, Trash2, Wallet, Users, CreditCard, Target, LayoutGrid, Download,
   Database, HandCoins, ChevronLeft, ChevronRight, Pencil, Check, X, AlertTriangle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { createClient } from "@supabase/supabase-js";
 
-const STORAGE_KEY_V2 = "eliana-finanzas-v2";
-const STORAGE_KEY_V1 = "eliana-finanzas-personal-v1";
+const SUPABASE_URL = "https://zqfciflgksxxqbfvxkad.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpxZmNpZmxna3N4eHFiZnZ4a2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTk5NjgsImV4cCI6MjA5OTUzNTk2OH0.lJDps1bqv4nvVPhGuF2rzXNlpdfJeyKjXZQdR_Bqsao";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+async function cargarDatos(userId) {
+  const { data, error } = await supabase.from("finanzas_data").select("data").eq("user_id", userId).single();
+  if (error && error.code !== "PGRST116") throw error;
+  return data?.data || null;
+}
+async function guardarDatos(userId, datos) {
+  const { error: ue } = await supabase.from("finanzas_data").update({ data: datos, updated_at: new Date().toISOString() }).eq("user_id", userId);
+  if (ue) {
+    const { error: ie } = await supabase.from("finanzas_data").insert({ user_id: userId, data: datos, updated_at: new Date().toISOString() });
+    if (ie) console.error("Error guardando:", ie.message);
+  }
+}
+
+function AuthScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [modo, setModo] = useState("login");
+  const [cargando, setCargando] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const handleSubmit = async () => {
+    if (!email || !password) { setErr("Ingresa correo y contraseña."); return; }
+    setCargando(true); setErr(""); setMsg("");
+    try {
+      if (modo === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) setErr(error.message === "Invalid login credentials" ? "Correo o contraseña incorrectos." : error.message);
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) setErr(error.message);
+        else setMsg("¡Cuenta creada! Revisa tu correo para confirmar.");
+      }
+    } catch(e) { setErr("Error inesperado."); }
+    setCargando(false);
+  };
+  const s = { minHeight:"100vh", background:"#F1F3EC", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'IBM Plex Sans',sans-serif" };
+  const card = { background:"white", borderRadius:16, padding:40, width:"100%", maxWidth:400, boxShadow:"0 4px 24px rgba(0,0,0,0.08)" };
+  const inp = { padding:"9px 12px", borderRadius:8, border:"1px solid #D8DCCF", fontSize:14, fontFamily:"inherit", width:"100%", boxSizing:"border-box" };
+  const btn = (active) => ({ flex:1, padding:"8px 0", borderRadius:999, border:"1px solid", borderColor:active?"#2F5D50":"#D8DCCF", background:active?"#2F5D50":"white", color:active?"white":"#55605A", cursor:"pointer", fontSize:13 });
+  return (
+    <div style={s}>
+      <div style={card}>
+        <div style={{ fontSize:11, textTransform:"uppercase", letterSpacing:"0.08em", color:"#2F5D50", fontWeight:600, marginBottom:4 }}>Finanzas personales</div>
+        <h1 style={{ fontFamily:"serif", fontSize:28, margin:"0 0 24px", color:"#1F2E28" }}>Eliana Posada</h1>
+        <div style={{ display:"flex", gap:8, marginBottom:24 }}>
+          <button onClick={() => setModo("login")} style={btn(modo==="login")}>Iniciar sesión</button>
+          <button onClick={() => setModo("registro")} style={btn(modo==="registro")}>Crear cuenta</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          <label style={{ display:"flex", flexDirection:"column", gap:4, fontSize:12, color:"#55605A" }}>Correo<input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()} style={inp} /></label>
+          <label style={{ display:"flex", flexDirection:"column", gap:4, fontSize:12, color:"#55605A" }}>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()} style={inp} /></label>
+          {err && <div style={{ background:"#F7E3DF", border:"1px solid #A34A3D", borderRadius:8, padding:"8px 12px", fontSize:12, color:"#A34A3D" }}>{err}</div>}
+          {msg && <div style={{ background:"#DCE6DE", border:"1px solid #2F5D50", borderRadius:8, padding:"8px 12px", fontSize:12, color:"#2F5D50" }}>{msg}</div>}
+          <button onClick={handleSubmit} disabled={cargando} style={{ background:"#2F5D50", color:"white", border:"none", padding:"11px 0", borderRadius:8, fontSize:14, fontWeight:500, cursor:cargando?"not-allowed":"pointer", opacity:cargando?0.7:1 }}>{cargando?"Cargando…":modo==="login"?"Entrar":"Crear cuenta"}</button>
+        </div>
+        <div style={{ marginTop:20, fontSize:11, color:"#9AA398", textAlign:"center" }}>Tus datos se guardan de forma privada y segura.</div>
+      </div>
+    </div>
+  );
+}
+
 
 // ---------------- Utilidades ----------------
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -232,42 +296,7 @@ function migrateFromV1(old, base) {
   return next;
 }
 
-// Importa datos del módulo Compartidos legacy (claves propias en window.storage)
-async function importCompartidosLegacy(data) {
-  let changed = false;
-  const next = { ...data };
-  try {
-    const cfg = await window.storage.get("budget-config", false);
-    if (cfg && cfg.value) {
-      const cats = JSON.parse(cfg.value).map((c) =>
-        c.id === "dona_alba" ? { ...c, id: "limpieza", label: "Limpieza" } : c
-      );
-      next.compartidosCategorias = cats;
-      changed = true;
-    }
-  } catch (e) {}
-  try {
-    const exp = await window.storage.get("expenses", false);
-    if (exp && exp.value) {
-      const gastos = JSON.parse(exp.value).map((g) => ({
-        ...g, category: g.category === "dona_alba" ? "limpieza" : g.category,
-        porcentaje: g.porcentaje || 100, movId: g.movId || null,
-      }));
-      next.compartidosGastos = gastos;
-      changed = true;
-    }
-  } catch (e) {}
-  try {
-    const dir = await window.storage.get("terceros-directory", false);
-    if (dir && dir.value) {
-      next.compartidosDirectorio = JSON.parse(dir.value).map((d) =>
-        d.categoria === "dona_alba" ? { ...d, categoria: "limpieza" } : d
-      );
-      changed = true;
-    }
-  } catch (e) {}
-  return { data: next, changed };
-}
+function importCompartidosLegacy(data) { return { data, changed: false }; }
 
 // ---------------- Derivaciones de medio de pago (color / etiqueta / naturaleza) ----------------
 // Devuelve { color: 'verde'|'rojo'|'neutro', etiqueta: ''|'TC'|'GDM', esCaja, esTC, esGDM }
@@ -408,6 +437,7 @@ const emptyCategoria = { nombre: "", tipoGasto: "Fijo-Fijo", presupuesto: "" };
 export default function FinanzasApp() {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [session, setSession] = useState(undefined);
   const [tab, setTab] = useState("panorama");
   const [fuenteSec, setFuenteSec] = useState("ingresos");
   const [selectedMonth, setSelectedMonth] = useState(monthISO());
@@ -429,37 +459,35 @@ export default function FinanzasApp() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
-  // ---------- Carga y migración ----------
+  // ---------- Auth y carga Supabase ----------
   useEffect(() => {
-    (async () => {
-      let d = null;
-      try {
-        const res = await window.storage.get(STORAGE_KEY_V2, false);
-        if (res && res.value) d = JSON.parse(res.value);
-      } catch (e) {}
-      if (!d) {
-        const base = seedDataV2();
-        let old = null;
-        try {
-          const resOld = await window.storage.get(STORAGE_KEY_V1, false);
-          if (resOld && resOld.value) old = JSON.parse(resOld.value);
-        } catch (e) {}
-        d = old ? migrateFromV1(old, base) : base;
-        const imp = await importCompartidosLegacy(d);
-        d = imp.data;
-        if (old || imp.changed) setTimeout(() => showToast("Datos anteriores migrados al nuevo modelo."), 400);
-      }
-      setData(d);
-      setLoaded(true);
-    })();
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => setSession(session));
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!loaded || !data) return;
+    if (!session || !session.user) return;
+    setLoaded(false);
     (async () => {
-      try { await window.storage.set(STORAGE_KEY_V2, JSON.stringify(data), false); }
-      catch (e) { console.error("No se pudo guardar", e); }
+      try {
+        const d = await cargarDatos(session.user.id);
+        setData(d || seedDataV2());
+      } catch(e) {
+        console.error("Error cargando:", e);
+        setData(seedDataV2());
+      }
+      setLoaded(true);
     })();
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!loaded || !data || !session?.user) return;
+    const t = setTimeout(async () => {
+      try { await guardarDatos(session.user.id, data); }
+      catch(e) { console.error("Error guardando:", e); }
+    }, 1000);
+    return () => clearTimeout(t);
   }, [data, loaded]);
 
   // Metas por defecto por cada deuda activa
