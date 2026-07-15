@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useRef } from "react";
+import React from "react";
 import {
   Plus, Trash2, Wallet, Users, CreditCard, Target, LayoutGrid, Download,
   Database, HandCoins, ChevronLeft, ChevronRight, Pencil, Check, X, AlertTriangle,
@@ -438,6 +440,7 @@ export default function FinanzasApp() {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [session, setSession] = useState(undefined);
+  const cargadoDesdeDB = React.useRef(false); // guard: solo guardar DESPUÉS de haber leído Supabase
   const [tab, setTab] = useState("panorama");
   const [fuenteSec, setFuenteSec] = useState("ingresos");
   const [selectedMonth, setSelectedMonth] = useState(monthISO());
@@ -445,6 +448,7 @@ export default function FinanzasApp() {
   const [extraMensual, setExtraMensual] = useState(0);
   const [simResults, setSimResults] = useState(null);
   const [movForm, setMovForm] = useState(emptyMovi);
+  const [editingMovId, setEditingMovId] = useState(null); // null = nuevo movimiento, id = editando
   const [deudaForm, setDeudaForm] = useState(emptyDeudaCat);
   const [metaForm, setMetaForm] = useState(emptyMeta);
   const [ingresoForm, setIngresoForm] = useState(emptyIngreso);
@@ -472,6 +476,7 @@ export default function FinanzasApp() {
     (async () => {
       try {
         const d = await cargarDatos(session.user.id);
+        cargadoDesdeDB.current = true;
         setData(d || seedDataV2());
       } catch(e) {
         console.error("Error cargando:", e);
@@ -482,11 +487,11 @@ export default function FinanzasApp() {
   }, [session?.user?.id]);
 
   useEffect(() => {
-    if (!loaded || !data || !session?.user) return;
+    if (!loaded || !data || !session?.user || !cargadoDesdeDB.current) return;
     const t = setTimeout(async () => {
       try { await guardarDatos(session.user.id, data); }
       catch(e) { console.error("Error guardando:", e); }
-    }, 1000);
+    }, 1200);
     return () => clearTimeout(t);
   }, [data, loaded]);
 
@@ -1166,7 +1171,7 @@ export default function FinanzasApp() {
   const renderMovimientos = () => (
     <div className="stack">
       <div className="form-card">
-        <div className="section-title">Registrar movimiento</div>
+        <div className="section-title">{editingMovId ? "✏️ Editando movimiento" : "Registrar movimiento"}</div>
         <div className="form-grid">
           <label>Fecha<input type="date" value={movForm.fecha} onChange={(e) => setMovForm({ ...movForm, fecha: e.target.value })} /></label>
           <label>Tipo
@@ -1316,7 +1321,10 @@ export default function FinanzasApp() {
           );
         })()}
 
-        <button className="btn-primary" onClick={submitMovi}><Plus size={16} /> Guardar movimiento</button>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <button className="btn-primary" onClick={submitMovi}><Plus size={16} /> {editingMovId ? "Actualizar movimiento" : "Guardar movimiento"}</button>
+          {editingMovId && <button className="btn-secondary" onClick={() => { setMovForm(emptyMovi); setEditingMovId(null); }}>✕ Cancelar edición</button>}
+        </div>
       </div>
 
       <div className="full-tbl">
@@ -1339,7 +1347,14 @@ export default function FinanzasApp() {
                     {m.compartido && <span className="tag">Compartido · pagó {m.compartidoPagadoPor} ({m.compartidoPorcentaje}%)</span>}
                   </td>
                   <td className="small muted">{m.notas}</td>
-                  <td><button className="icon-btn" onClick={() => eliminarMovimiento(m.id)}><Trash2 size={14} /></button></td>
+                  <td style={{display:"flex",gap:4}}>
+                    <button className="icon-btn" title="Editar" onClick={() => {
+                      setMovForm({ fecha:m.fecha, tipo:m.tipo, monto:m.monto, terceroId:m.terceroId||"", medioPagoId:m.medioPagoId||"", cuentaOrigenId:m.cuentaOrigenId||"", categoriaId:m.categoriaId||"", subcategoriaId:m.subcategoriaId||"", fuenteIngresoId:m.fuenteIngresoId||"", notas:m.notas||"", compartido:m.compartido||false, compartidoPagadoPor:m.compartidoPagadoPor||"Eliana", compartidoPorcentaje:m.compartidoPorcentaje||100, compartidoCategoriaId:m.compartidoCategoriaId||"", deudaId:m.deudaId||"", abonoCapital:m.abonoCapital||"", tarjetaPagoId:m.tarjetaPagoId||"" });
+                      setEditingMovId(m.id);
+                      window.scrollTo({top:0,behavior:"smooth"});
+                    }}><Pencil size={14} /></button>
+                    <button className="icon-btn" title="Eliminar" onClick={() => eliminarMovimiento(m.id)}><Trash2 size={14} /></button>
+                  </td>
                 </tr>
               );
             })}
